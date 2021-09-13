@@ -148,4 +148,4 @@ class Challenge:
 
 
 if __name__ == "__main__":
-    obj = Challenge("https://itdashboard.gov/", 0, "output")
+    obj = Challenge("https://itdashboard.gov/", 9, "output")
