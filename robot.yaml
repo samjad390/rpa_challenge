@@ -1,8 +1,6 @@
 tasks:
-  entrypoint:
-    command:
-      - python
-      - tasks.py
+  Run Python:
+    shell: python challenge.py
 
 condaConfigFile: conda.yaml
 artifactsDir: output
