@@ -1,28 +1,34 @@
 import os
+import re
 from time import sleep
 from datetime import timedelta
 from RPA.Browser.Selenium import Selenium
 from RPA.Excel.Files import Files
 from RPA.PDF import PDF
 
-OUTPUT_DIR = "output"
 
+class Challenge:
 
-if not os.path.exists(OUTPUT_DIR):
-    os.mkdir(OUTPUT_DIR)
-
-
-class ItDashboard:
-    agencies = []
-    headers = []
-
-    def __init__(self):
+    def __init__(self, url, agency_to_scrap, dirname):
+        self.dirname = dirname
+        self.create_default_directory(dirname)
+        self.agencies = []
+        self.headers = []
+        self.investment_data = {
+            "uii": [], "bureau": [], "company": [], "final_year": [], "agency_type": [], "rating": [],
+            "no_of_project": [], "pdf_match_title": ["PDF Match Title"], "pdf_match_uii": ["PDF Match UII"]
+        }
         self.browser = Selenium()
         self.files = Files()
-        self.browser.open_available_browser("https://itdashboard.gov/")
+        self.downloader = Selenium()
+        self.downloader.set_download_directory(os.path.join(os.getcwd(), f"{self.dirname}"))
+        self.browser.open_available_browser(url)
         self.pdf = PDF()
-        self.scrap_agencies()
-        self.scrap_agency(0)
+        self.perform_scraping(agency_to_scrap)
+
+    def create_default_directory(self, dirname):
+        if not os.path.exists(dirname):
+            os.mkdir(dirname)
 
     def scrap_agencies(self):
         self.browser.wait_until_page_contains_element('//*[@id="node-23"]/div/div/div/div/div/div/div/a')
@@ -37,39 +43,37 @@ class ItDashboard:
             companies.append(agency_data[0])
             investments.append(agency_data[2])
         entries = {"companies": companies, "investments": investments}
-        wb = self.files.create_workbook("output/Agencies.xlsx")
+        wb = self.files.create_workbook(f"{self.dirname}/Agencies.xlsx")
         wb.append_worksheet("Sheet", entries)
         wb.save()
 
-    def get_headers(self):
+    def get_table_headers(self):
         while True:
             try:
-                all_heads = self.browser.find_element(
+                find_table_header = self.browser.find_element(
                     '//table[@class="datasource-table usa-table-borderless dataTable no-footer"]'
                 ).find_element_by_tag_name(
                     "thead").find_elements_by_tag_name("tr")[1].find_elements_by_tag_name("th")
-                if all_heads:
+                if find_table_header:
                     break
             except:
                 sleep(1)
-        for item in all_heads:
-            self.headers.append(item.text)
+        for head in find_table_header:
+            self.headers.append(head.text)
 
-    def match_pdf(self, uii, name):
-        self.pdf.extract_pages_from_pdf(
-            source_path=f"output/{uii}.pdf",
-            output_path=f"output/page{uii}.pdf",
-            pages=1
-        )
-        text = self.pdf.get_text_from_pdf(f"output/page{uii}.pdf")
-        for i in text:
-            if name and uii in text[i]:
-                os.remove(f"output/page{uii}.pdf")
-                return True
-        os.remove(f"output/page{uii}.pdf")
+    def match_text(self, page_text, text_to_find):
+        if text_to_find in page_text:
+            return True
         return False
 
-    def scrap_agency(self, agency_to_open):
+    def match_pdf(self, uii, name):
+        all_text = self.pdf.get_text_from_pdf(f"{self.dirname}/{uii}.pdf")
+        section_a = re.split(r'Bureau:|Section B', all_text[1])[1]
+        name_match = self.match_text(section_a, name)
+        uii_match = self.match_text(section_a, uii)
+        return name_match, uii_match
+
+    def scrap_single_agency(self, agency_to_open):
         agency = self.agencies[agency_to_open]
         url = self.browser.find_element(agency).find_element_by_tag_name("a").get_attribute("href")
         self.browser.go_to(url)
@@ -82,81 +86,66 @@ class ItDashboard:
         self.browser.find_element('//*[@id="investments-table-object_length"]/label/select/option[4]').click()
         self.browser.wait_until_page_contains_element(
             f'//*[@id="investments-table-object"]/tbody/tr[{total_entries}]/td[1]', timeout=timedelta(seconds=20))
-        self.get_headers()
-        uii_ids = [self.headers[0]]
-        bureau = [self.headers[1]]
-        investment_title = [self.headers[2]]
-        total_final_year = [self.headers[3]]
-        type_agency = [self.headers[4]]
-        rating = [self.headers[5]]
-        num_of_project = [self.headers[6]]
-        pdf_match = ["PDF MATCH", ]
+        self.get_table_headers()
+        self.investment_data["uii"].append(self.headers[0])
+        self.investment_data["bureau"].append(self.headers[1])
+        self.investment_data["company"].append(self.headers[2])
+        self.investment_data["final_year"].append(self.headers[3])
+        self.investment_data["agency_type"].append(self.headers[4])
+        self.investment_data["rating"].append(self.headers[5])
+        self.investment_data["no_of_project"].append(self.headers[6])
 
         for i in range(1, int(total_entries) + 1):
             item = self.browser.find_element(f'//*[@id="investments-table-object"]/tbody/tr[{i}]/td[1]')
-            bureau_current = self.browser.find_element(
-                f'//*[@id="investments-table-object"]/tbody/tr[{i}]/td[2]').text
-            investment_title_current = self.browser.find_element(
-                f'//*[@id="investments-table-object"]/tbody/tr[{i}]/td[3]').text
-            total_current = self.browser.find_element(
-                f'//*[@id="investments-table-object"]/tbody/tr[{i}]/td[4]').text
-            type_agency_current = self.browser.find_element(
-                f'//*[@id="investments-table-object"]/tbody/tr[{i}]/td[5]').text
-            rating_current = self.browser.find_element(
-                f'//*[@id="investments-table-object"]/tbody/tr[{i}]/td[6]').text
-            num_of_project_current = self.browser.find_element(
-                f'//*[@id="investments-table-object"]/tbody/tr[{i}]/td[7]').text
-            bureau.append(bureau_current)
-            investment_title.append(investment_title_current)
-            total_final_year.append(total_current)
-            type_agency.append(type_agency_current)
-            rating.append(rating_current)
-            num_of_project.append(num_of_project_current)
-            uii_ids.append(item.text)
+            self.investment_data["uii"].append(item.text)
+            self.investment_data["bureau"].append(self.browser.find_element(
+                f'//*[@id="investments-table-object"]/tbody/tr[{i}]/td[2]').text)
+            self.investment_data["company"].append(self.browser.find_element(
+                f'//*[@id="investments-table-object"]/tbody/tr[{i}]/td[3]').text)
+            self.investment_data["final_year"].append(self.browser.find_element(
+                f'//*[@id="investments-table-object"]/tbody/tr[{i}]/td[4]').text)
+            self.investment_data["agency_type"].append(self.browser.find_element(
+                f'//*[@id="investments-table-object"]/tbody/tr[{i}]/td[5]').text)
+            self.investment_data["rating"].append(self.browser.find_element(
+                f'//*[@id="investments-table-object"]/tbody/tr[{i}]/td[6]').text)
+            self.investment_data["no_of_project"].append(self.browser.find_element(
+                f'//*[@id="investments-table-object"]/tbody/tr[{i}]/td[7]').text)
             try:
                 link = self.browser.find_element(
                     f'//*[@id="investments-table-object"]/tbody/tr[{i}]/td[1]').find_element_by_tag_name(
                     "a").get_attribute("href")
             except:
                 link = ''
+            match = "--"
+            uii_match = "--"
             if link:
-                downloader = Selenium()
-                downloader.set_download_directory(os.path.join(os.getcwd(), f"{OUTPUT_DIR}"))
-                downloader.open_available_browser(link)
-                downloader.wait_until_page_contains_element('//div[@id="business-case-pdf"]')
-                downloader.find_element('//div[@id="business-case-pdf"]').click()
+                self.downloader.open_available_browser(link)
+                self.downloader.wait_until_page_contains_element('//div[@id="business-case-pdf"]')
+                self.downloader.find_element('//div[@id="business-case-pdf"]').click()
                 while True:
-                    if os.path.exists(f"output/{uii_ids[i]}.pdf"):
+                    if os.path.exists(f"{self.dirname}/{self.investment_data['uii'][i]}.pdf"):
                         break
                     else:
                         sleep(1)
-                downloader.close_browser()
-                check = self.match_pdf(uii_ids[i], investment_title[i])
-                if check:
-                    match = f"{uii_ids[i]}.pdf"
-                else:
-                    match = f"pdf not match"
-            else:
-                match = "--"
-            pdf_match.append(match)
-        data = {"uii": uii_ids,
-                "bureau": bureau,
-                "company": investment_title,
-                "FY2021": total_final_year,
-                "agency_type": type_agency,
-                "CIO rating": rating,
-                "# of project": num_of_project,
-                "PDF Match": pdf_match,
-                }
-        wb = self.files.create_workbook("output/uii table.xlsx")
-        wb.append_worksheet("Sheet", data)
-        wb.save()
+                self.downloader.close_browser()
+                (name_match, uii_matched) = self.match_pdf(self.investment_data['uii'][i], self.investment_data['company'][i])
+                if name_match:
+                    match = f"{self.investment_data['uii'][i]}.pdf"
+                if uii_matched:
+                    uii_match = f"{self.investment_data['uii'][i]}.pdf"
+            self.investment_data['pdf_match_title'].append(match)
+            self.investment_data['pdf_match_uii'].append(uii_match)
+
+    def write_investment_file(self):
+        work_book = self.files.create_workbook(f"{self.dirname}/Investment.xlsx")
+        work_book.append_worksheet("Sheet", self.investment_data)
+        work_book.save()
 
     def perform_scraping(self, agency_to_scrap):
         self.scrap_agencies()
-        self.scrap_agency(agency_to_scrap)
+        self.scrap_single_agency(agency_to_scrap)
+        self.write_investment_file()
 
 
 if __name__ == "__main__":
-    obj = ItDashboard()
-
+    obj = Challenge("https://itdashboard.gov/", 0, "output")
